@@ -30,3 +30,15 @@ data <- read_ipums_micro(ddi)
 
 
 
+```{r}
+# Creating a dataset with votes from the 2016 election:
+
+library(dplyr)
+
+votes_2016 <- read.csv("data/countypres_2000-2020.csv")
+votes_2016 <- votes_2016 %>%
+  filter(year == 2016)
+votes_2016 <- data.frame(votes_2016)
+write.csv(votes_2016, "C:\\Users\\Francesco\\Dropbox\\University\\Data Science for Public Policy\\assignments\\670_final_project\\data\\countypres_2000-2020.csv", row.names=FALSE)
+votes_data <- read.csv("countypres_2000-2020.csv")
+```
