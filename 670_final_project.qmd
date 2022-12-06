@@ -3,5 +3,30 @@ title: "Juan Reyes, Ilya Schneider, Francesco de Luca"
 format: html
 editor: source
 self-contained: true
+editor_options: 
+  chunk_output_type: console
 ---
+``` {r}
+
+#libraries 
+library(tidyverse)
+library(dplyr)
+library(ipumsr)
+
+```
+
+``` {r}
+setwd("/Users/juanreyes/Documents/georgetown/datascience/670_final_project/data")
+```
+
+``` {r}
+ddi <- read_ipums_ddi("cps_00010.xml")
+data <- read_ipums_micro(ddi)
+
+```
+
+
+
+
+
 
