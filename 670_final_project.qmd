@@ -6,13 +6,13 @@ self-contained: true
 editor_options: 
   chunk_output_type: console
 ---
-``` {r}
+Loading libraries:
 
-#libraries 
+``` {r}
 library(tidyverse)
 library(dplyr)
 library(ipumsr)
-
+library(janitor)
 ```
 
 ``` {r}
@@ -20,8 +20,20 @@ setwd("/Users/juanreyes/Documents/georgetown/datascience/670_final_project/data"
 ```
 
 ``` {r}
-ddi <- read_ipums_ddi("cps_00010.xml")
+ddi <- read_ipums_ddi("data/cps_00010.xml")
 data <- read_ipums_micro(ddi)
+data <- clean_names(data)
 
+cps_svy <- data %>%
+  # Recode variables as dummies (0,1):
+  mutate_at(vars(pubhous, foodstmp, sex, vetstat, labforce, diffany, , ), list(~ case_when(
+    . == 2 ~ 1,
+    . == 1 ~ 0,
+    TRUE ~ NA_real_
+  ))) %>%
+  mutate_at(vars(workly, list(~ case_when(
+    . == 02 ~ 1,
+    . == 01 ~ 0,
+  
 ```
 
