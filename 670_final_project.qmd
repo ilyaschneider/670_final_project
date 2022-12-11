@@ -2,38 +2,244 @@
 title: "Juan Reyes, Ilya Schneider, Francesco de Luca"
 format: html
 editor: source
+  markdown: 
+    wrap: 72
 self-contained: true
 editor_options: 
   chunk_output_type: console
 ---
+
 Loading libraries:
 
-``` {r}
+```{r}
 library(tidyverse)
 library(dplyr)
 library(ipumsr)
 library(janitor)
+library(srvyr)
+library(parsnip)
+library(survey)
+library(tidymodels)
+library(patchwork)
+library(rpart.plot)
+library(lubridate)
+library(themis)
+library(tune)
+library(tigris)
 ```
 
-``` {r}
+```{r}
 setwd("/Users/juanreyes/Documents/georgetown/datascience/670_final_project/data")
 ```
 
-``` {r}
-ddi <- read_ipums_ddi("data/cps_00010.xml")
+```{r}
+ddi <- read_ipums_ddi("cps_00010.xml")
 data <- read_ipums_micro(ddi)
 data <- clean_names(data)
-
-cps_svy <- data %>%
-  # Recode variables as dummies (0,1):
-  mutate_at(vars(pubhous, foodstmp, sex, vetstat, labforce, diffany, , ), list(~ case_when(
-    . == 2 ~ 1,
-    . == 1 ~ 0,
-    TRUE ~ NA_real_
-  ))) %>%
-  mutate_at(vars(workly, list(~ case_when(
-    . == 02 ~ 1,
-    . == 01 ~ 0,
-  
 ```
 
+```{r}
+cps_svy <- data %>%
+  
+  #Remove unnecessary variables
+  select(-asecflag, -serial, -month, -cpsid, -cpsidp, -pernum, -asecwth) %>%
+  
+  #Remove multi-state FIPS codes
+  filter(statefip <= 56) %>%
+  
+  #Recode missing or otherwise unavailabe data into NAs
+  mutate_at(vars(statefip, offpov), list(~ case_when(. == 99 ~ NA_real_, TRUE ~ as.numeric(.)))) %>%
+  mutate_at(vars(county, pubhous, ownershp, empstat, labforce, diffany, workly, poverty, himcarely, phinsur, kidcneed, union, yrimmig, foodstmp, stampval), list(~ case_when( . == 0 ~ NA_real_, TRUE ~ as.numeric(.)))) %>%
+  #should occ/occly and ind/indly be in here? I feel like no, but just want to double check
+  mutate_at(vars(metro, migrate1, vetstat), list(~ case_when(. == 0 | . == 9 ~ NA_real_, TRUE ~ as.numeric(.)))) %>%
+  mutate(hhincome = case_when(hhincome == 99999999 ~ NA_real_, TRUE ~ as.numeric(hhincome))) %>%
+  mutate_at(vars(citizen, marst, sex), list(~ case_when(. == 9 ~ NA_real_, TRUE ~ as.numeric(.)))) %>%
+  mutate_at(vars(classwkr, classwly), list(~ case_when(. == 0 | . == 99 ~ NA_real_, TRUE ~ as.numeric(.)))) %>%
+  mutate(hispan = case_when(hispan == 901 | hispan == 902 ~ NA_real_, TRUE ~ as.numeric(hispan))) %>%
+  mutate(uhrsworkt = case_when(uhrsworkt == 997 | uhrsworkt == 999 ~ NA_real_, TRUE ~ as.numeric(uhrsworkt))) %>%
+  mutate(educ = case_when(educ == 001 | educ == 999 ~ NA_real_, TRUE ~ as.numeric(educ))) %>%
+  mutate(incss = case_when(incss == 999999 ~ NA_real_, TRUE ~ as.numeric(incss))) %>%
+  mutate(incfarm = case_when(incfarm == 99999999 | incfarm == 99999998 ~ NA_real_, TRUE ~ as.numeric(incfarm))) %>%
+  mutate(incint = case_when(incint == 9999999 ~ NA_real_, TRUE ~ as.numeric(incint))) %>%
+  mutate(bpl = case_when(bpl == 96000 | bpl == 99999 ~ NA_real_, TRUE ~ as.numeric(bpl))) %>%
+  mutate(race = case_when(race == 999 ~ NA_real_, TRUE ~ as.numeric(race))) %>%
+#HIMCAIDLY - covered by Medicaid last year only exists for 2019, not 2018
+#YRIMMIG - what to do? throw away 2005, 2009, 2013?
+  
+  #Create dummy variable for immigration status:
+  mutate(immigrant = case_when(citizen == 1 ~ 0, citizen != 1 ~ 1, TRUE ~ NA_real_)) %>%
+  
+  #Recode variables as dummies:
+  mutate_at(vars(pubhous, foodstmp, sex, vetstat, labforce, diffany, himcaidly, himcarely, phinsur, anycovnw, kidcneed, workly), list(~ case_when(
+    . == 2 ~ 1,
+    . == 1 ~ 0,
+    TRUE ~ NA_real_))) %>%
+  
+  #Recode poverty in reverse, since we want 1 to be those in poverty:
+  mutate_at(vars(offpov), list(~ case_when(
+    . == 01 ~ 1,
+    . == 02 ~ 0,
+    TRUE ~ NA_real_)))
+
+#Weight the data as a survey using individual weights
+#NOTE TO GROUP: we can perform any operation on this object as we normally would on a typical df. See example in next code chunk, where I find the mean age in the object
+weighted_cps <- as_survey_design(cps_svy, weights = asecwt)
+
+#Create tibbles by year to use in model construction
+#NOTE TO GROUP: I am doing this assuming that we will train the model on 2018 data and predict on 2019 data
+weighted_cps_2018 <- as.data.frame(weighted_cps) %>%
+  filter(year == 2018)
+weighted_cps_2019 <- as.data.frame(weighted_cps) %>%
+  filter(year == 2019)
+```
+
+IPUMS uses two different measures of poverty, namely offpov and poverty. The former is used to calculate official poverty rates, correcting for errors in the poverty variable by including those only in the poverty universe. The documentation explains that "If one restricts the poverty universe correctly, POVERTY will replicate official poverty rates for most years except for survey years 2000, 1993, 1987-1975 and 1970." Is there considerable difference in the data between how these two variables measure poverty rates between the years?
+
+```{r}
+#Creating bar charts to see the difference between "offpov" and "poverty" in the data 
+
+offpov_bar <- weighted_cps %>%
+  drop_na(offpov) %>%
+  select(year, offpov) %>%
+  group_by(year, offpov) %>%
+  summarize(prop = survey_prop()*100) %>%
+  ggplot(aes(x = factor(year), y = prop, fill = factor(offpov))) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = round(prop, 2)), 
+            position = position_dodge(width = 1),
+            color="black", vjust = -.2, hjust = .5) +
+  labs(
+    title = "Using offpov",
+    subtitle = "The percentage of people in poverty (offpov) decreased \n from 12.31% to 11.78% between 2018 and 2019.",
+    caption = "Source: IPUMS",
+    x = "Year",
+    y = "Percentage of population",
+    fill = "Status"
+  ) +
+  scale_fill_hue(labels = c("Above poverty line", "Below poverty line")) +
+  theme(legend.title = element_blank()) +
+  theme_minimal()
+
+
+poverty_bar_clean <- weighted_cps %>%
+  drop_na(poverty) %>%
+  #Make poverty a binary indicator
+  mutate(poverty = case_when(poverty == 10 ~ 1, poverty >= 20 ~ 0)) %>%
+  select(year, poverty) %>%
+  group_by(year, poverty) %>%
+  summarize(prop = survey_prop()*100) %>%
+  ggplot(aes(x = factor(year), y = prop, fill = factor(poverty))) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = round(prop, 2)), 
+            position = position_dodge(width = 1),
+            color="black", vjust = -.2, hjust = .5) +
+  labs(
+    title = "Using poverty",
+    subtitle = "The percentage of people in poverty (poverty) decreased \n from 12.47% to 11.92% between 2018 and 2019.",
+    caption = "Source: IPUMS",
+    x = "Year",
+    y = "Percentage of population",
+    fill = "Status"
+  ) +
+  scale_fill_hue(labels = c("Above poverty line", "Below poverty line")) +
+  theme(legend.title = element_blank()) +
+  theme_minimal()
+  
+
+poverty_bar_detail <- weighted_cps %>%
+  drop_na(poverty) %>% 
+  #Reverse the categories
+  mutate(poverty = case_when(
+    poverty == 10 ~ 3,
+    poverty == 21 ~ 2,
+    poverty == 22 ~ 1,
+    poverty == 23 ~ 0
+  )) %>%
+  select(year, poverty) %>%
+  group_by(year, poverty) %>%
+  summarize(prop = survey_prop()*100) %>%
+  ggplot(aes(x = factor(year), y = prop, fill = factor(poverty))) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = round(prop, 2)), 
+            position = position_dodge(width = 1),
+            color="black", vjust = -.2) +
+  labs(
+    title = "Percentage of Population Relative to the Poverty Line, using poverty",
+    subtitle = "The percentage of people in poverty (poverty) and close to poverty decreased between 2018 and 2019. \n Approximately 8 to 8.5% of the population were close to poverty in those years.",
+    caption = "Source: IPUMS",
+    x = "Year",
+    y = "Percentage of population",
+    fill = "Status"
+  ) +
+  scale_fill_hue(labels = c("150 percent and above the low-income level", "125-149 percent of the low-income level", "100-124 percent of the low-income level", "Below poverty line")) +
+  theme(legend.title = element_blank()) +
+  theme_minimal()
+
+
+((offpov_bar + poverty_bar_clean ) / poverty_bar_detail) + plot_annotation(title = 'Percentage of Population in Poverty')
+```
+
+As the bar-charts above show, there is a very minor difference in poverty rates between "offpov" and "poverty." In both 2018 and 2019, the difference in poverty rate was less than 0.25 percentage points in magnitude between the two variables. We can conclude that these two variables are very similar. That being said, the poverty levels remained relatively constant between 2018 and 2019, as no major disruptions in the economic markets were occurring at the time.
+
+## More visualizations
+
+```{r}
+bar_by_educ <- weighted_cps %>%
+  drop_na(offpov, educ) %>%
+  filter(age >= 18) %>%
+  mutate(max_educ = case_when(
+    educ <= 71 ~ 0, #Less than HS diploma
+    educ == 73 ~ 1, #HS diploma
+    educ <= 92 & educ > 73 ~ 2, #Some college/Associate's
+    educ == 111 ~ 3, #Bachelor's
+    educ > 111 ~ 4 #Master's, professional, doctorate
+  )) %>%
+  select(offpov, max_educ) %>%  
+  group_by(max_educ) %>%
+  summarize(pov = mean(offpov)*100) %>%
+  ggplot(aes(x = max_educ, y = pov, fill = factor(max_educ))) +
+  geom_col() +
+  geom_text(aes(label = round(pov, 2)), vjust = -.5) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  scale_x_continuous(breaks = NULL) +
+  labs(
+    title = "Percentage of Adults (above 18) in Poverty by Highest Education Earned",
+    subtitle = "Those without a HS degree experience the most poverty, at almost 25%. \nHaving a graduate degree lowers your chances of poverty to 3.44%.",
+    caption = "Source: IPUMS",
+    x = "Highest level of education", 
+    y = "Percentage of group in poverty", 
+    fill = "Highest Education Earned"
+  ) +
+  scale_fill_hue(labels = c("Less than HS diploma", "HS diploma", "Some college/Associate's degree", "Bachelor's degree", "Master's/Professional/Doctorate degree"))
+  
+bar_by_educ
+```
+
+```{r}
+line_by_age <- weighted_cps %>%
+  drop_na(race, offpov, age) %>%
+  select(race, offpov, age) %>%
+  mutate(Race = factor(case_when(
+    race == 100 ~ "White",
+    race != 100 ~ "Non-White"
+  ))) %>%
+  #filter(age < 80) %>% Since anyone between 80 and 84 is coded as 80, and anyone 85 or above is coded as 85
+  group_by(Race, age) %>%
+  summarize(pov = mean(offpov)*100) %>%
+  ggplot(aes(x = age, y = pov, color = Race)) +
+  geom_line(linewidth = 1) +
+  scale_x_continuous(expand = expansion(mult = c(0.002, 0))) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.002))) +
+  labs(
+    title = "Poverty Rate by Age and Race",
+    subtitle = "Whites experience much lower poverty rates than non-Whites at all ages. \nPoverty drops when people enter working age, increases around 50, and drops again at retirement.",
+    caption = "Source: IPUMS",
+    x = "Age", 
+    y = "Percentage of population in poverty",
+    fill = "Race"
+  ) +
+  theme_minimal()
+
+line_by_age
+```
