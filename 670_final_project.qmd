@@ -42,15 +42,14 @@ data <- clean_names(data)
 cps_svy <- data %>%
   
   #Remove unnecessary variables
-  select(-asecflag, -serial, -month, -cpsid, -cpsidp, -pernum, -asecwth) %>%
+  select(-asecflag, -serial, -month, -cpsid, -cpsidp, -pernum, -asecwth, -himcaidly) %>%
   
   #Remove multi-state FIPS codes
   filter(statefip <= 56) %>%
   
   #Recode missing or otherwise unavailabe data into NAs
   mutate_at(vars(statefip, offpov), list(~ case_when(. == 99 ~ NA_real_, TRUE ~ as.numeric(.)))) %>%
-  mutate_at(vars(county, pubhous, ownershp, empstat, labforce, diffany, workly, poverty, himcarely, phinsur, kidcneed, union, yrimmig, foodstmp, stampval), list(~ case_when( . == 0 ~ NA_real_, TRUE ~ as.numeric(.)))) %>%
-  #should occ/occly and ind/indly be in here? I feel like no, but just want to double check
+  mutate_at(vars(county, pubhous, ownershp, empstat, labforce, diffany, workly, poverty, himcarely, phinsur, kidcneed, union, yrimmig, foodstmp, stampval, occ, ind, occly, indly), list(~ case_when( . == 0 ~ NA_real_, TRUE ~ as.numeric(.)))) %>%
   mutate_at(vars(metro, migrate1, vetstat), list(~ case_when(. == 0 | . == 9 ~ NA_real_, TRUE ~ as.numeric(.)))) %>%
   mutate(hhincome = case_when(hhincome == 99999999 ~ NA_real_, TRUE ~ as.numeric(hhincome))) %>%
   mutate_at(vars(citizen, marst, sex), list(~ case_when(. == 9 ~ NA_real_, TRUE ~ as.numeric(.)))) %>%
@@ -63,14 +62,12 @@ cps_svy <- data %>%
   mutate(incint = case_when(incint == 9999999 ~ NA_real_, TRUE ~ as.numeric(incint))) %>%
   mutate(bpl = case_when(bpl == 96000 | bpl == 99999 ~ NA_real_, TRUE ~ as.numeric(bpl))) %>%
   mutate(race = case_when(race == 999 ~ NA_real_, TRUE ~ as.numeric(race))) %>%
-#HIMCAIDLY - covered by Medicaid last year only exists for 2019, not 2018
-#YRIMMIG - what to do? throw away 2005, 2009, 2013?
   
   #Create dummy variable for immigration status:
   mutate(immigrant = case_when(citizen == 1 ~ 0, citizen != 1 ~ 1, TRUE ~ NA_real_)) %>%
   
   #Recode variables as dummies:
-  mutate_at(vars(pubhous, foodstmp, sex, vetstat, labforce, diffany, himcaidly, himcarely, phinsur, anycovnw, kidcneed, workly), list(~ case_when(
+  mutate_at(vars(pubhous, foodstmp, sex, vetstat, labforce, diffany, himcarely, phinsur, anycovnw, kidcneed, workly), list(~ case_when(
     . == 2 ~ 1,
     . == 1 ~ 0,
     TRUE ~ NA_real_))) %>%
@@ -82,11 +79,9 @@ cps_svy <- data %>%
     TRUE ~ NA_real_)))
 
 #Weight the data as a survey using individual weights
-#NOTE TO GROUP: we can perform any operation on this object as we normally would on a typical df. See example in next code chunk, where I find the mean age in the object
 weighted_cps <- as_survey_design(cps_svy, weights = asecwt)
 
 #Create tibbles by year to use in model construction
-#NOTE TO GROUP: I am doing this assuming that we will train the model on 2018 data and predict on 2019 data
 weighted_cps_2018 <- as.data.frame(weighted_cps) %>%
   filter(year == 2018)
 weighted_cps_2019 <- as.data.frame(weighted_cps) %>%
@@ -242,4 +237,32 @@ line_by_age <- weighted_cps %>%
   theme_minimal()
 
 line_by_age
+```
+
+``` {r}
+states <- tigris::states(cb = TRUE , year = 2018) %>%
+  filter(!STATEFP %in% c("60", "69", "72", "78", "66", "15", "02"))
+
+#Group by state and calculate the poverty rate
+cps_svy_map <- as_survey_design(cps_svy, weights = asecwt) %>%
+  filter(year == 2018, !is.na(offpov)) %>%
+  group_by(statefip) %>%
+  srvyr::summarize(pov_rate = survey_mean(offpov)) %>%
+  rename(STATEFP = statefip)
+
+cps_svy_map$STATEFP <- as.character(cps_svy_map$STATEFP)
+cps_svy_map$STATEFP <- str_pad(cps_svy_map$STATEFP, 2, c("left"), "0")
+  
+joined_data <- left_join(states, cps_svy_map, by = "STATEFP")
+
+map <- cps_svy_map %>%
+  ggplot() +
+  geom_sf(joined_data, mapping = aes(fill = as.numeric(pov_rate))) +
+  scale_fill_gradient(name = "Poverty Rate", low = "lightblue", high = "darkblue") +
+  theme_void() +
+  labs(
+    title = "Poverty Rate in the Contiguous U.S. in 2018",
+    subtitle= "State-level poverty rates range from 6.6% in New Hampshire to 21% in Louisiana."
+  )
+map
 ```
