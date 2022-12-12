@@ -9,7 +9,7 @@ editor_options:
 
 Loading libraries:
 
-```{r}
+```{r , message=FALSE}
 library(tidyverse)
 library(dplyr)
 library(ipumsr)
@@ -24,10 +24,12 @@ library(lubridate)
 library(themis)
 library(tune)
 library(tigris)
+library(ranger)
+library(randomForest)
 ```
 
-```{r}
-setwd("/Users/juanreyes/Documents/georgetown/datascience/670_final_project/data")
+``` {r , echo = FALSE}
+setwd("/Users/juanreyes/Documents/georgetown/datascience/670_final_project")
 ```
 
 ```{r}
@@ -237,10 +239,12 @@ line_by_age <- weighted_cps %>%
 line_by_age
 ```
 
-``` {r}
+``` {r , results=FALSE}
 states <- tigris::states(cb = TRUE , year = 2018) %>%
   filter(!STATEFP %in% c("60", "69", "72", "78", "66", "15", "02"))
+```
 
+``` {r}
 #Group by state and calculate the poverty rate
 cps_svy_map <- as_survey_design(cps_svy, weights = asecwt) %>%
   filter(year == 2018, !is.na(offpov)) %>%
@@ -263,4 +267,62 @@ map <- cps_svy_map %>%
     subtitle= "State-level poverty rates range from 6.6% in New Hampshire to 21% in Louisiana."
   )
 map
+
 ```
+
+
+<!-- # # Creating dataframe for model  -->
+<!-- # model_cps2018 <- weighted_cps_2018 %>% -->
+<!-- #   select (-poverty , -hhincome) %>% -->
+<!-- #   filter(!is.na(offpov))  -->
+<!-- #  -->
+<!-- # #Splitting 2018 data into a training and testing set -->
+<!-- # set.seed(12112022) -->
+<!-- #  -->
+<!-- # poverty_modeling_split <- initial_split(model_cps2018) -->
+<!-- # poverty_modeling_train <- training(x = poverty_modeling_split) -->
+<!-- # poverty_modeling_test  <- testing(x = poverty_modeling_split) -->
+<!-- # ``` -->
+<!-- #  -->
+<!-- # ``` {r} -->
+<!-- # #1. Setting up v-fold cross-validation with 4 folds -->
+<!-- # folds <- vfold_cv(poverty_modeling_train, v = 4) -->
+<!-- #  -->
+<!-- # #2. Creating a recipe object  -->
+<!-- # poverty_rec <- -->
+<!-- #   recipe(offpov ~., data = poverty_modeling_train) %>% -->
+<!-- # step_center(all_numeric_predictors()) %>% # center predictors -->
+<!-- #   step_scale(all_numeric_predictors()) %>% # scale predictors -->
+<!-- #   step_nzv(all_numeric_predictors()) %>%   # drop near zero variance predictors -->
+<!-- #  -->
+<!-- # ``` -->
+<!-- #  -->
+<!-- # ``` {r} -->
+<!-- # #2. Creating a random forest model -->
+<!-- # forest_mod <- rand_forest() %>%  -->
+<!-- #   set_engine(engine = "ranger") %>% -->
+<!-- #   set_mode(mode = "regression") -->
+<!-- # #3. Creating a workflow -->
+<!-- # forest_wf <- workflow() %>%  -->
+<!-- #   add_recipe(poverty_rec) %>% -->
+<!-- #   add_model(forest_mod) -->
+<!-- # #4. Fitting the model -->
+<!-- # forest_rs <- forest_wf %>%  -->
+<!-- #   tune_grid(resamples = folds, -->
+<!-- #             control = control_grid(save_pred = TRUE), -->
+<!-- #             metrics = metric_set(mae, rmse)) -->
+<!-- #  -->
+<!-- # ``` -->
+<!-- # #5. Calculating MAE and RMSE -->
+<!-- # forest_rs %>% -->
+<!-- #   collect_metrics() -->
+<!-- # #The mean MAE is , and the mean RMSE is  -->
+<!-- # forest_rs %>% -->
+<!-- #   show_best() -->
+<!-- # forest_rs %>% -->
+<!-- #   select_best() -->
+<!-- # forest_rs %>% -->
+<!-- #   collect_predictions() -->
+
+
+
