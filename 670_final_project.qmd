@@ -20,7 +20,7 @@ The project’s public GitHub repository can be seen [here](https://github.com/i
 
 Next we load the necessary libraries and read in the data:
 
-``` {r}
+``` {r, message = FALSE}
 library(tidyverse)
 library(dplyr)
 library(ipumsr)
@@ -38,13 +38,15 @@ library(tigris)
 library(randomForest)
 library(ranger)
 library(glmnet)
+library(labelled)
+library(haven)
 ```
 
-``` {r}
+``` {r, echo = FALSE}
 setwd("G:/MPP/Fall 2022/PPOL 670/Final_project_materials/data")
 ```
 
-``` {r}
+``` {r, results = FALSE}
 ddi <- read_ipums_ddi("cps_00010.xml")
 data <- read_ipums_micro(ddi)
 data <- clean_names(data)
@@ -260,7 +262,7 @@ line_by_age
 Measuring poverty rate in 2018 by age and race it is evident that whites have a significantly lower incidence of poverty than non-whites. The disparity in poverty rates between whites and non-whites is most significant at younger ages, and falls as individuals enter the workforce. Interestingly, we can see that non-whites incidence of poverty increases again around age 45 and that this gap in poverty rates widen as they age. Poverty rates decline briefly after retirement, which can likely be attributed to people getting access to their social security benefits and government provided healthcare, but they rise again as people enter their 70's and 80's. 
 
 
-```{r}
+```{r, results = FALSE}
 states <- tigris::states(cb = TRUE, year = 2018) %>%
   filter(!STATEFP %in% c("60", "69", "72", "78", "66", "15", "02"))
 
@@ -295,7 +297,7 @@ Looking at the map of contiguous U.S. we can observe there is a wide variation o
 
 First, we make a basic decision tree to understand which variables were the most useful in predicting poverty in our data frame. We excluded from our model the other measure of poverty (`poverty`), as well as household income, from the model, since both of those are directly predictive of poverty, and are thus not useful to us.
 
-```{r}
+```{r, results = FALSE}
 #Creating data frame for the analysis
 weighted_cps <- as_survey_design(cps_svy, weights = asecwt) %>%
   select(-poverty, -hhincome)
@@ -407,7 +409,7 @@ rf_model <- rand_forest(mtry = 10, min_n = tune(), trees = 100) %>%
 # Create a workflow
 rf_workflow <-
   workflow() %>%
-  add_model(rf_mod) %>%
+  add_model(rf_model) %>%
   add_recipe(rf_rec)
 
 # Create a grid of the parameters
@@ -415,43 +417,43 @@ rf_grid <- grid_regular(
   min_n(range = c(2, 8)),
   levels = 4)
 
-# Execute hyperparameter tuning using the grid and the cross_validation folds
-rf_cv <- tune_grid(rf_workflow,
-                   resamples = folds,
-                   grid = rf_grid,
-                   metrics = metric_set(roc_auc))
+# Execute hyperparameter tuning using the grid and the cross_validation folds - here is where the code takes too long to run
+#rf_cv <- tune_grid(rf_workflow,
+                   #resamples = folds,
+                   #grid = rf_grid,
+                   #metrics = metric_set(roc_auc))
 
-# Calculate ROC_AUC and accuracy 
-collect_metrics(rf_cv, summarize = TRUE) %>%
-  filter(.metric == "roc_auc")
+# Calculate ROC_AUC and accuracy
+#collect_metrics(rf_cv, summarize = TRUE) %>%
+  #filter(.metric == "roc_auc")
 
 # Select the best model based on roc_auc
-rf_best_model <- rf_cv %>%
-  select_best(metric = "roc_auc")
+#rf_best_model <- rf_cv %>%
+  #select_best(metric = "roc_auc")
 
 # Finalize model
-rf_final_model <- finalize_model(rf_model, rf_best_model)
+#rf_final_model <- finalize_model(rf_model, rf_best_model)
 # Evaluate variable importance
-rf_last_fit %>%
-  extract_fit_parsnip() %>%
-  vip::vip(num_features = 15)
-rf_predictions <- bind_cols(rf__cps_2018_test,
-                            predict(object = rf_last_fit, new_data = rf__cps_2018_test),
-                            predict(object = rf_last_fit, new_data = rf__cps_2018_test, type = "prob"))
+#rf_last_fit %>%
+  #extract_fit_parsnip() %>%
+  #vip::vip(num_features = 15)
+#rf_predictions <- bind_cols(rf__cps_2018_test,
+                            #predict(object = rf_last_fit, new_data = rf__cps_2018_test),
+                            #predict(object = rf_last_fit, new_data = rf__cps_2018_test, type = "prob"))
 
 # To evaluate the model calculate...
 # Confusion matrix
-conf_mat(data = rf_predictions,
-         truth = offpov,
-         estimate = .pred_class)
+#conf_mat(data = rf_predictions,
+         #truth = offpov,
+         #estimate = .pred_class)
 # Accuracy
-accuracy(data = rf_predictions,
-          truth = offpov,
-          estimate = .pred_class)
+#accuracy(data = rf_predictions,
+          #truth = offpov,
+          #estimate = .pred_class)
 # ROC_AUC metric
-roc_auc(data = rf_predictions,
-     truth = employed,
-     estimate = .pred_0)
+#roc_auc(data = rf_predictions,
+     #truth = employed,
+     #estimate = .pred_0)
 ```
 
 
@@ -462,48 +464,48 @@ In the KNN model, we attempted to predict the value of `offpov` with the predict
 
 ```{r}
 #Creating folds:
-folds <- vfold_cv(data = weighted_cps_train, v = 5)
+#folds <- vfold_cv(data = weighted_cps_train, v = 5)
 #Creating a recipe object:
-weighted_cps_rec <- 
-  recipe(formula = offpov ~ ., data = weighted_cps_train) %>%
-  step_dummy(immigrant, 
-             pubhous, 
-             foodstmp, 
-             sex, 
-             vetstat, 
-             labforce, 
-             diffany, 
-             himcaidly, 
-             himcarely, 
-             phinsur, 
-             anycovnw, 
-             kidcneed, 
-             workly)
-  step_center(all_numeric_predictors()) %>%
-  step_scale(all_numeric_predictors()) %>%
-  step_nzv(all_numeric_predictors()) %>%
-  step_impute_knn(all_predictors()) %>%
-  step_other()
+#weighted_cps_rec <- 
+  #recipe(formula = offpov ~ ., data = weighted_cps_train) %>%
+  #step_dummy(immigrant, 
+             #pubhous, 
+             #foodstmp, 
+             #sex, 
+             #etstat, 
+             #labforce, 
+             #diffany, 
+             #himcaidly, 
+             #himcarely, 
+             #phinsur, 
+             #anycovnw, 
+             #kidcneed, 
+             #workly)
+  #step_center(all_numeric_predictors()) %>%
+  #step_scale(all_numeric_predictors()) %>%
+  #step_nzv(all_numeric_predictors()) %>%
+  #step_impute_knn(all_predictors()) %>%
+  #step_other()
   
 # Creating a KNN model with hyper parameter tuning:
 # Creating a KNN model specification:
-weighted_cps_knn_mod <-
-  nearest_neighbor(neighbors = tune()) %>%
-  set_engine(engine = "kknn") %>%
-  set_mode(mode = "classification")
+#weighted_cps_knn_mod <-
+  #nearest_neighbor(neighbors = tune()) %>%
+  #set_engine(engine = "kknn") %>%
+  #set_mode(mode = "classification")
 # Creating a workflow:
-weighted_cps_knn_workflow <-
-  workflow() %>%
-  add_model(spec = weighted_cps_knn_mod) %>%
-  add_recipe(recipe = weighted_cps_rec)
+#weighted_cps_knn_workflow <-
+  #workflow() %>%
+  #add_model(spec = weighted_cps_knn_mod) %>%
+  #add_recipe(recipe = weighted_cps_rec)
 # Creating a tuning grid:
-weighted_cps_knn_grid <- grid_regular(neighbors(range = c(1, 15)), levels = 2)
+#weighted_cps_knn_grid <- grid_regular(neighbors(range = c(1, 15)), levels = 2)
 # Estimating models with re-sampling for each row in the tuning grid:
-weighted_cps_knn_res <- weighted_cps_knn_workflow %>% 
-  tune_grid(resamples = folds,
-            grid = weighted_cps_knn_grid,
-            control = control_grid(save_pred = TRUE),
-            metrics = metric_set(accuracy))
+#weighted_cps_knn_res <- weighted_cps_knn_workflow %>% 
+  #tune_grid(resamples = folds,
+            #grid = weighted_cps_knn_grid,
+            #control = control_grid(save_pred = TRUE),
+            #metrics = metric_set(accuracy))
 ```
 
 
@@ -577,16 +579,16 @@ lasso_final <- lasso_wf %>%
 lasso_coefs <- lasso_final %>%
   fit(data = weighted_cps_2018_train)
 
-lasso_predictions <- bind_cols(weighted_cps_2018_test,
-                               predict(object = lasso_final, new_data = weighted_cps_2018_test),
-                               predict(object = lasso_final, new_data = weighted_cps_2018_test, type = "prob"))
+#lasso_predictions <- bind_cols(weighted_cps_2018_test,
+                               #predict(object = lasso_final, new_data = weighted_cps_2018_test),
+                               #predict(object = lasso_final, new_data = weighted_cps_2018_test, type = "prob"))
 ```
 
 Had this model succeeded, we would have attempted to measure its quality, using accuracy, precision, and other metrics discussed in class.
 
 ```{r}
-conf_mat(data = lasso_predictions, truth = offpov, estimate = .pred_class)
-accuracy(data = lasso_predictions, truth = offpov, estimate = .pred_class)
-precision(data = lasso_predictions, truth = offpov, estimate = .pred_class)
-spec(data = lasso_predictions, truth = offpov, estimate = .pred_class)
+#conf_mat(data = lasso_predictions, truth = offpov, estimate = .pred_class)
+#accuracy(data = lasso_predictions, truth = offpov, estimate = .pred_class)
+#precision(data = lasso_predictions, truth = offpov, estimate = .pred_class)
+#spec(data = lasso_predictions, truth = offpov, estimate = .pred_class)
 ```
